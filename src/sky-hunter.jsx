@@ -10,6 +10,7 @@ const SkyHunter = () => {
   const [highScore, setHighScore] = useState(0);
   const [combo, setCombo] = useState(0);
   const [isCloudCooldown, setIsCloudCooldown] = useState(false);
+  const [viewport, setViewport] = useState({ w: 0, h: 0 });
   const [activeBuffs, setActiveBuffs] = useState({
     speed: false,
     shield: false,
@@ -51,6 +52,8 @@ const SkyHunter = () => {
   const lastTimeRef = useRef(performance.now());
 
   // Game constants
+  const BASE_WIDTH = 800;
+  const BASE_HEIGHT = 600;
   const GRAVITY = 0.14;
   const JUMP_FORCE = -5.2;
   const BASE_SPEED = 2;
@@ -78,6 +81,13 @@ const SkyHunter = () => {
   }, []);
 
   useEffect(() => {
+    const updateViewport = () => setViewport({ w: window.innerWidth, h: window.innerHeight });
+    updateViewport();
+    window.addEventListener('resize', updateViewport);
+    return () => window.removeEventListener('resize', updateViewport);
+  }, []);
+
+  useEffect(() => {
     isPausedRef.current = isPaused;
   }, [isPaused]);
 
@@ -88,6 +98,7 @@ const SkyHunter = () => {
   useEffect(() => {
     scoreRef.current = score;
   }, [score]);
+
 
   const spawnCloud = useCallback(() => {
     const game = gameRef.current;
@@ -100,6 +111,15 @@ const SkyHunter = () => {
       opacity: 0.6 + Math.random() * 0.4
     };
   }, []);
+
+  const uiScale = viewport.w ? Math.min(1, Math.max(0.75, viewport.w / 900)) : 1;
+  const hudScale = viewport.w
+    ? (viewport.w < 420 ? 0.85 : viewport.w < 720 ? 0.95 : 1)
+    : 1;
+  const isDesktop = viewport.w >= 900;
+  const isCompact = viewport.w > 0 && viewport.w < 720;
+  const iconSize = Math.round(18 + 8 * uiScale);
+  const heartSize = viewport.w && viewport.w < 420 ? Math.round(iconSize * 0.85) : iconSize;
 
   const spawnInsect = useCallback(() => {
     const game = gameRef.current;
@@ -298,13 +318,29 @@ const SkyHunter = () => {
     const game = gameRef.current;
     let animationId;
     const dpr = window.devicePixelRatio || 1;
+    let resizeRaf;
 
-    canvas.width = 800 * dpr;
-    canvas.height = 600 * dpr;
-    canvas.style.width = '800px';
-    canvas.style.height = '600px';
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.scale(dpr, dpr);
+    const resizeCanvas = () => {
+      const maxWidth = Math.max(280, window.innerWidth - 24);
+      const maxHeight = Math.max(380, window.innerHeight - 24);
+      const canUpscale = window.innerWidth < 900 || window.innerHeight < 700;
+      const scale = Math.min(
+        maxWidth / BASE_WIDTH,
+        maxHeight / BASE_HEIGHT,
+        canUpscale ? 10 : 1
+      );
+      const scaledWidth = Math.round(BASE_WIDTH * scale);
+      const scaledHeight = Math.round(BASE_HEIGHT * scale);
+
+      canvas.width = Math.round(scaledWidth * dpr);
+      canvas.height = Math.round(scaledHeight * dpr);
+      canvas.style.width = `${scaledWidth}px`;
+      canvas.style.height = `${scaledHeight}px`;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.scale(dpr * scale, dpr * scale);
+    };
+
+    resizeCanvas();
 
     const flap = () => {
       if (!isPausedRef.current) {
@@ -383,7 +419,13 @@ const SkyHunter = () => {
     canvas.addEventListener('touchcancel', handleTouchEnd);
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
+    const handleResize = () => {
+      if (resizeRaf) cancelAnimationFrame(resizeRaf);
+      resizeRaf = requestAnimationFrame(resizeCanvas);
+    };
+
     window.addEventListener('blur', handleBlur);
+    window.addEventListener('resize', handleResize);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     // Update game logic
@@ -589,15 +631,15 @@ const SkyHunter = () => {
       }
 
       // Render game
-      ctx.clearRect(0, 0, 800, 600);
+      ctx.clearRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
 
       // Sky gradient
-      const gradient = ctx.createLinearGradient(0, 0, 0, 600);
+      const gradient = ctx.createLinearGradient(0, 0, 0, BASE_HEIGHT);
       gradient.addColorStop(0, '#87CEEB');
       gradient.addColorStop(0.5, '#B0E0E6');
       gradient.addColorStop(1, '#E0F6FF');
       ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, 800, 600);
+      ctx.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
 
       // Clouds
       game.clouds.forEach(cloud => {
@@ -857,6 +899,7 @@ const SkyHunter = () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('resize', handleResize);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [gameState, spawnCloud, spawnInsect, spawnFly, checkCollision, activateBuff, createCollectionParticles, createCloudHitParticles, computeSpeed, GRAVITY, JUMP_FORCE]);
@@ -869,11 +912,14 @@ const SkyHunter = () => {
       alignItems: 'center',
       justifyContent: 'center',
       background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-      fontFamily: '"Fredoka", "Comic Sans MS", cursive',
-      overflow: 'hidden'
+      fontFamily: '"Rubik", system-ui, sans-serif',
+      overflow: 'hidden',
+      padding: '12px',
+      boxSizing: 'border-box',
+      WebkitTextSizeAdjust: '100%'
     }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Rubik:wght@400;600;700&display=swap');
         
         @keyframes float {
           0%, 100% { transform: translateY(0px); }
@@ -927,7 +973,7 @@ const SkyHunter = () => {
           animation: 'float 3s ease-in-out infinite'
         }}>
           <h1 style={{
-            fontSize: '72px',
+            fontSize: isDesktop ? '72px' : 'clamp(36px, 9vw, 72px)',
             margin: '0 0 20px 0',
             textShadow: '4px 4px 0 rgba(0,0,0,0.3)',
             fontWeight: 700
@@ -935,7 +981,7 @@ const SkyHunter = () => {
             Небесный Охотник
           </h1>
           <p style={{
-            fontSize: '24px',
+            fontSize: isDesktop ? '24px' : 'clamp(16px, 4vw, 24px)',
             marginBottom: '40px',
             opacity: 0.9
           }}>
@@ -946,7 +992,11 @@ const SkyHunter = () => {
             onClick={startGame}
             style={{
               background: 'linear-gradient(135deg, #F093FB 0%, #F5576C 100%)',
-              color: 'white'
+              color: 'white',
+              fontSize: isDesktop ? '20px' : 'clamp(16px, 4.5vw, 20px)',
+              padding: isDesktop
+                ? '16px 32px'
+                : 'clamp(12px, 3.5vw, 16px) clamp(20px, 6vw, 32px)'
             }}
           >
             Начать игру
@@ -954,7 +1004,7 @@ const SkyHunter = () => {
           {highScore > 0 && (
             <div style={{
               marginTop: '30px',
-              fontSize: '20px',
+              fontSize: isDesktop ? '20px' : 'clamp(16px, 4vw, 20px)',
               opacity: 0.8
             }}>
               Рекорд: {highScore}
@@ -962,9 +1012,9 @@ const SkyHunter = () => {
           )}
           <div style={{
             marginTop: '40px',
-            fontSize: '16px',
+            fontSize: isDesktop ? '16px' : 'clamp(12px, 3.5vw, 16px)',
             opacity: 0.7,
-            maxWidth: '600px',
+            maxWidth: 'min(90vw, 600px)',
             lineHeight: '1.6'
           }}>
             {gameRef.current.isMobile ? 
@@ -992,27 +1042,33 @@ const SkyHunter = () => {
           
           <div style={{
             position: 'absolute',
-            top: '20px',
-            left: '20px',
-            right: '20px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            animation: 'slideIn 0.5s ease-out'
+            top: 'clamp(8px, 2vw, 20px)',
+            left: 'clamp(8px, 2vw, 20px)',
+            right: 'clamp(8px, 2vw, 20px)',
+            animation: 'slideIn 0.5s ease-out',
+            fontVariantNumeric: 'tabular-nums'
           }}>
             <div style={{
-              background: 'rgba(255,255,255,0.95)',
-              padding: '12px 24px',
-              borderRadius: '50px',
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              background: 'transparent',
+              padding: isDesktop
+                ? '8px 12px'
+                : `${Math.round(4 * hudScale)}px ${Math.round(6 * hudScale)}px`,
+              borderRadius: '0',
               fontWeight: 700,
-              fontSize: '24px',
-              color: '#2C3E50',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
+              fontSize: isDesktop ? '24px' : `${Math.round(18 * hudScale)}px`,
+              color: '#FFFFFF',
+              textShadow: '0 2px 4px rgba(0,0,0,0.4)',
+              minWidth: `${Math.round(90 * hudScale)}px`,
+              textAlign: 'left',
+              lineHeight: 1
             }}>
-              Очки: {score}
+              {score}
             </div>
-            
+
             <button
-              className="game-button"
               onClick={() => {
                 setIsPaused(prev => {
                   const next = !prev;
@@ -1021,165 +1077,147 @@ const SkyHunter = () => {
                 });
               }}
               style={{
-                background: 'rgba(255,255,255,0.95)',
-                color: '#2C3E50',
-                padding: '12px 24px',
-                fontSize: '18px',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+                position: 'absolute',
+                top: 0,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                background: 'transparent',
+                color: '#FFFFFF',
+                padding: isDesktop
+                  ? '8px 12px'
+                  : `${Math.round(4 * hudScale)}px ${Math.round(8 * hudScale)}px`,
+                fontSize: isDesktop ? '18px' : `${Math.round(16 * hudScale)}px`,
+                textShadow: '0 2px 4px rgba(0,0,0,0.4)',
                 border: 'none',
-                borderRadius: '50px',
+                borderRadius: '0',
                 cursor: 'pointer',
-                fontWeight: 700
+                fontWeight: 700,
+                minWidth: `${Math.round(110 * hudScale)}px`,
+                boxShadow: 'none',
+                lineHeight: 1,
+                outline: 'none',
+                WebkitAppearance: 'none',
+                appearance: 'none',
+                zIndex: 1
               }}
             >
               {isPaused ? '▶ Продолжить' : '⏸ Пауза'}
             </button>
-            
+
             <div style={{
-              background: 'rgba(255,255,255,0.95)',
-              padding: '12px 24px',
-              borderRadius: '50px',
+              position: 'absolute',
+              top: 0,
+              right: 0,
               display: 'flex',
-              gap: '8px',
-              alignItems: 'center',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
+              flexDirection: 'column',
+              alignItems: 'flex-end',
+              gap: '4px'
             }}>
-              {Array(lives).fill(0).map((_, i) => (
-                <Heart key={i} size={24} fill="#EF4444" color="#EF4444" />
-              ))}
-              {isCloudCooldown && !activeBuffs.invincible && !activeBuffs.shield && (
-                <span style={{
-                  marginLeft: '6px',
-                  padding: '4px 10px',
-                  borderRadius: '999px',
-                  fontSize: '12px',
-                  fontWeight: 700,
-                  color: '#2C3E50',
-                  background: 'rgba(44, 62, 80, 0.12)',
-                  border: '1px solid rgba(44, 62, 80, 0.2)'
-                }}>
-                  ЗАЩИТА 1с
-                </span>
-              )}
-              {(activeBuffs.invincible || activeBuffs.shield) && (
-                <span style={{
-                  marginLeft: '6px',
-                  padding: '4px 10px',
-                  borderRadius: '999px',
-                  fontSize: '12px',
-                  fontWeight: 700,
-                  color: 'white',
-                  background: activeBuffs.invincible
-                    ? 'linear-gradient(135deg, #FFD700 0%, #FFA500 100%)'
-                    : '#FBBF24',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
-                }}>
-                  {activeBuffs.invincible ? 'НЕУЯЗВИМ.' : 'ЩИТ'}
-                </span>
-              )}
+              <div style={{
+                display: 'flex',
+                gap: '8px',
+                alignItems: 'center',
+                justifyContent: 'flex-end'
+              }}>
+                {Array(lives).fill(0).map((_, i) => (
+                  <Heart key={i} size={heartSize} fill="#EF4444" color="#EF4444" />
+                ))}
+              </div>
+              <div style={{
+                fontSize: `${Math.round(11 * hudScale)}px`,
+                color: 'rgba(255,255,255,0.85)',
+                textShadow: '0 1px 2px rgba(0,0,0,0.35)',
+                minHeight: `${Math.round(14 * hudScale)}px`
+              }}>
+                {isCloudCooldown && !activeBuffs.invincible && !activeBuffs.shield && 'Защита 1с'}
+                {(activeBuffs.invincible || activeBuffs.shield) &&
+                  (activeBuffs.invincible ? 'Неуязвимость' : 'Щит')}
+              </div>
             </div>
           </div>
 
-          {combo > 0 && (
-            <div style={{
-              position: 'absolute',
-              top: '80px',
-              left: '50%',
-              transform: 'translateX(-50%)',
-              background: 'linear-gradient(135deg, #F093FB 0%, #F5576C 100%)',
-              color: 'white',
-              padding: '12px 32px',
-              borderRadius: '50px',
-              fontWeight: 700,
-              fontSize: '20px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-              animation: 'pulse 0.5s ease-in-out'
-            }}>
-              Комбо: {combo}×
-            </div>
-          )}
 
           <div style={{
             position: 'absolute',
-            bottom: '20px',
-            left: '20px',
+            bottom: 'clamp(8px, 2vw, 20px)',
+            left: 'clamp(8px, 2vw, 20px)',
             display: 'flex',
             gap: '12px',
             flexWrap: 'wrap'
           }}>
             {activeBuffs.speed && (
               <div className="buff-icon" style={{
-                background: '#10B981',
+                background: 'rgba(16, 185, 129, 0.35)',
                 color: 'white',
-                padding: '10px 16px',
-                borderRadius: '30px',
+                padding: '4px 8px',
+                borderRadius: '10px',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '8px',
                 fontWeight: 600,
-                boxShadow: '0 4px 12px rgba(16, 185, 129, 0.4)'
+                boxShadow: 'none',
+                fontSize: isCompact ? '12px' : '13px'
               }}>
-                <Zap size={20} /> Ускорение
+                Ускорение
               </div>
             )}
             {activeBuffs.shield && (
               <div className="buff-icon" style={{
-                background: '#FBBF24',
+                background: 'rgba(251, 191, 36, 0.35)',
                 color: 'white',
-                padding: '10px 16px',
-                borderRadius: '30px',
+                padding: '4px 8px',
+                borderRadius: '10px',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '8px',
                 fontWeight: 600,
-                boxShadow: '0 4px 12px rgba(251, 191, 36, 0.4)'
+                boxShadow: 'none',
+                fontSize: isCompact ? '12px' : '13px'
               }}>
-                <Shield size={20} /> Щит
+                Щит
               </div>
             )}
             {activeBuffs.double && (
               <div className="buff-icon" style={{
-                background: '#EF4444',
+                background: 'rgba(239, 68, 68, 0.35)',
                 color: 'white',
-                padding: '10px 16px',
-                borderRadius: '30px',
+                padding: '4px 8px',
+                borderRadius: '10px',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '8px',
                 fontWeight: 600,
-                boxShadow: '0 4px 12px rgba(239, 68, 68, 0.4)'
+                boxShadow: 'none',
+                fontSize: isCompact ? '12px' : '13px'
               }}>
-                <TrendingUp size={20} /> ×2 Очков
+                ×2 Очков
               </div>
             )}
             {activeBuffs.slow && (
               <div className="buff-icon" style={{
-                background: '#8B5CF6',
+                background: 'rgba(139, 92, 246, 0.35)',
                 color: 'white',
-                padding: '10px 16px',
-                borderRadius: '30px',
+                padding: '4px 8px',
+                borderRadius: '10px',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '8px',
                 fontWeight: 600,
-                boxShadow: '0 4px 12px rgba(139, 92, 246, 0.4)'
+                boxShadow: 'none',
+                fontSize: isCompact ? '12px' : '13px'
               }}>
-                <Clock size={20} /> Замедление
+                Замедление
               </div>
             )}
             {activeBuffs.invincible && (
               <div className="buff-icon" style={{
-                background: 'linear-gradient(135deg, #FFD700 0%, #FFA500 100%)',
+                background: 'rgba(255, 215, 0, 0.35)',
                 color: 'white',
-                padding: '10px 16px',
-                borderRadius: '30px',
+                padding: '4px 8px',
+                borderRadius: '10px',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '8px',
                 fontWeight: 600,
-                boxShadow: '0 4px 12px rgba(255, 215, 0, 0.5)'
+                boxShadow: 'none',
+                fontSize: isCompact ? '12px' : '13px'
               }}>
-                ⭐ Неуязвимость
+                Неуязвимость
               </div>
             )}
           </div>
@@ -1195,7 +1233,8 @@ const SkyHunter = () => {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              borderRadius: '20px'
+              borderRadius: '20px',
+              zIndex: 2
             }}>
               <div style={{
                 background: 'white',
@@ -1205,7 +1244,7 @@ const SkyHunter = () => {
                 boxShadow: '0 20px 60px rgba(0,0,0,0.5)'
               }}>
                 <h2 style={{
-                  fontSize: '48px',
+                  fontSize: isDesktop ? '48px' : 'clamp(28px, 7vw, 48px)',
                   margin: '0 0 20px 0',
                   color: '#2C3E50',
                   fontWeight: 700
@@ -1220,7 +1259,11 @@ const SkyHunter = () => {
                   }}
                   style={{
                     background: 'linear-gradient(135deg, #F093FB 0%, #F5576C 100%)',
-                    color: 'white'
+                    color: 'white',
+                    fontSize: isDesktop ? '20px' : 'clamp(16px, 4.5vw, 20px)',
+                    padding: isDesktop
+                      ? '16px 32px'
+                      : 'clamp(12px, 3.5vw, 16px) clamp(20px, 6vw, 32px)'
                   }}
                 >
                   Продолжить
@@ -1238,7 +1281,7 @@ const SkyHunter = () => {
           animation: 'float 3s ease-in-out infinite'
         }}>
           <h1 style={{
-            fontSize: '64px',
+            fontSize: isDesktop ? '64px' : 'clamp(32px, 8vw, 64px)',
             margin: '0 0 20px 0',
             textShadow: '4px 4px 0 rgba(0,0,0,0.3)',
             fontWeight: 700
@@ -1246,7 +1289,7 @@ const SkyHunter = () => {
             Игра окончена!
           </h1>
           <div style={{
-            fontSize: '48px',
+            fontSize: isDesktop ? '48px' : 'clamp(24px, 7vw, 48px)',
             marginBottom: '20px',
             fontWeight: 600
           }}>
@@ -1254,7 +1297,7 @@ const SkyHunter = () => {
           </div>
           {score === highScore && score > 0 && (
             <div style={{
-              fontSize: '28px',
+              fontSize: isDesktop ? '28px' : 'clamp(18px, 5vw, 28px)',
               color: '#FFD700',
               marginBottom: '20px',
               fontWeight: 600,
@@ -1265,7 +1308,7 @@ const SkyHunter = () => {
           )}
           {highScore > 0 && score !== highScore && (
             <div style={{
-              fontSize: '24px',
+              fontSize: isDesktop ? '24px' : 'clamp(16px, 4.5vw, 24px)',
               marginBottom: '20px',
               opacity: 0.8
             }}>
@@ -1278,7 +1321,11 @@ const SkyHunter = () => {
             style={{
               background: 'linear-gradient(135deg, #F093FB 0%, #F5576C 100%)',
               color: 'white',
-              marginTop: '20px'
+              marginTop: '20px',
+              fontSize: isDesktop ? '20px' : 'clamp(16px, 4.5vw, 20px)',
+              padding: isDesktop
+                ? '16px 32px'
+                : 'clamp(12px, 3.5vw, 16px) clamp(20px, 6vw, 32px)'
             }}
           >
             Играть снова
