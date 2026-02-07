@@ -9,6 +9,7 @@ const SkyHunter = () => {
   const [lives, setLives] = useState(3);
   const [highScore, setHighScore] = useState(0);
   const [combo, setCombo] = useState(0);
+  const [isCloudCooldown, setIsCloudCooldown] = useState(false);
   const [activeBuffs, setActiveBuffs] = useState({
     speed: false,
     shield: false,
@@ -16,11 +17,16 @@ const SkyHunter = () => {
     slow: false,
     invincible: false
   });
+  const isPausedRef = useRef(isPaused);
+  const activeBuffsRef = useRef(activeBuffs);
+  const scoreRef = useRef(score);
   const buffTimeoutsRef = useRef({});
+  const cloudCooldownActiveRef = useRef(false);
   const keyStateRef = useRef({
     left: false,
     right: false,
     up: false,
+    down: false,
     space: false
   });
 
@@ -45,8 +51,8 @@ const SkyHunter = () => {
   const lastTimeRef = useRef(performance.now());
 
   // Game constants
-  const GRAVITY = 0.22;
-  const JUMP_FORCE = -6.2;
+  const GRAVITY = 0.14;
+  const JUMP_FORCE = -5.2;
   const BASE_SPEED = 2;
 
   const computeSpeed = useCallback((buffs) => {
@@ -70,6 +76,18 @@ const SkyHunter = () => {
   useEffect(() => {
     gameRef.current.isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
   }, []);
+
+  useEffect(() => {
+    isPausedRef.current = isPaused;
+  }, [isPaused]);
+
+  useEffect(() => {
+    activeBuffsRef.current = activeBuffs;
+  }, [activeBuffs]);
+
+  useEffect(() => {
+    scoreRef.current = score;
+  }, [score]);
 
   const spawnCloud = useCallback(() => {
     const game = gameRef.current;
@@ -223,6 +241,7 @@ const SkyHunter = () => {
     setScore(0);
     setLives(3);
     setCombo(0);
+    isPausedRef.current = false;
     setIsPaused(false);
     setActiveBuffs({
       speed: false,
@@ -257,7 +276,11 @@ const SkyHunter = () => {
       }
 
       if (gameState === 'playing') {
-        setIsPaused(prev => !prev);
+        setIsPaused(prev => {
+          const next = !prev;
+          isPausedRef.current = next;
+          return next;
+        });
       }
     };
 
@@ -284,7 +307,7 @@ const SkyHunter = () => {
     ctx.scale(dpr, dpr);
 
     const flap = () => {
-      if (!isPaused) {
+      if (!isPausedRef.current) {
         game.swift.velocity = JUMP_FORCE;
       }
     };
@@ -297,13 +320,14 @@ const SkyHunter = () => {
     };
     const handleKeyDown = (e) => {
       const code = e.code;
-      if (code === 'ArrowUp' || code === 'ArrowLeft' || code === 'ArrowRight' || code === 'Space') {
+      if (code === 'ArrowUp' || code === 'ArrowDown' || code === 'ArrowLeft' || code === 'ArrowRight' || code === 'Space') {
         e.preventDefault();
       }
 
       if (code === 'ArrowLeft') keyStateRef.current.left = true;
       if (code === 'ArrowRight') keyStateRef.current.right = true;
       if (code === 'ArrowUp') keyStateRef.current.up = true;
+      if (code === 'ArrowDown') keyStateRef.current.down = true;
       if (code === 'Space') keyStateRef.current.space = true;
 
       if (code === 'ArrowUp' || code === 'Space' || code === 'ArrowLeft' || code === 'ArrowRight') {
@@ -319,11 +343,18 @@ const SkyHunter = () => {
       if (code === 'ArrowLeft') keyStateRef.current.left = false;
       if (code === 'ArrowRight') keyStateRef.current.right = false;
       if (code === 'ArrowUp') keyStateRef.current.up = false;
+      if (code === 'ArrowDown') keyStateRef.current.down = false;
       if (code === 'Space') keyStateRef.current.space = false;
     };
-    const handleBlur = () => setIsPaused(true);
+    const handleBlur = () => {
+      isPausedRef.current = true;
+      setIsPaused(true);
+    };
     const handleVisibilityChange = () => {
-      if (document.hidden) setIsPaused(true);
+      if (document.hidden) {
+        isPausedRef.current = true;
+        setIsPaused(true);
+      }
     };
 
     let lastTouchX = null;
@@ -357,8 +388,9 @@ const SkyHunter = () => {
 
     // Update game logic
     const updateGame = (dt) => {
+      const buffs = activeBuffsRef.current;
       // Update camera
-      const baseSpeed = computeSpeed(activeBuffs);
+      const baseSpeed = computeSpeed(buffs);
       game.speed = baseSpeed * game.speedFactor;
       game.camera += game.speed * dt;
 
@@ -374,6 +406,9 @@ const SkyHunter = () => {
         } else if (game.speedFactor < 1) {
           game.speedFactor = clampSpeedFactor(game.speedFactor + decelRate * dt);
         }
+      }
+      if (keyStateRef.current.down) {
+        game.swift.velocity += 0.6 * dt;
       }
       if (game.flapCooldown > 0) {
         game.flapCooldown -= dt;
@@ -404,6 +439,13 @@ const SkyHunter = () => {
       // Cooldown for cloud hits
       if (game.cloudHitCooldown > 0) {
         game.cloudHitCooldown--;
+        if (!cloudCooldownActiveRef.current) {
+          cloudCooldownActiveRef.current = true;
+          setIsCloudCooldown(true);
+        }
+      } else if (cloudCooldownActiveRef.current) {
+        cloudCooldownActiveRef.current = false;
+        setIsCloudCooldown(false);
       }
 
       // Update invincibility from combo
@@ -445,7 +487,7 @@ const SkyHunter = () => {
       }
 
       // Check collisions with clouds
-      const isInvincible = activeBuffs.invincible || activeBuffs.shield;
+      const isInvincible = buffs.invincible || buffs.shield;
       game.clouds.forEach(cloud => {
         const swiftWorldX = game.swift.x + game.camera;
         const cloudHitboxWidth = (cloud.width / 2) * 0.6;
@@ -465,14 +507,14 @@ const SkyHunter = () => {
               const newLives = prev - 1;
               if (newLives <= 0) {
                 setGameState('gameOver');
-                setHighScore(h => Math.max(h, score));
+                setHighScore(h => Math.max(h, scoreRef.current));
               }
               return Math.max(0, newLives);
             });
             game.comboCount = 0;
             setCombo(0);
           }
-          if (activeBuffs.shield && game.cloudHitCooldown === 0) {
+          if (buffs.shield && game.cloudHitCooldown === 0) {
             createCloudHitParticles(game.swift.x, game.swift.y);
             game.cloudHitCooldown = 60;
             setActiveBuffs(prev => ({ ...prev, shield: false }));
@@ -485,7 +527,7 @@ const SkyHunter = () => {
       game.insects = game.insects.filter(insect => {
         if (checkCollision({x: swiftWorldX, y: game.swift.y}, insect, 25, insect.size)) {
           const insectData = COLORS[insect.type];
-          const points = insectData.points * (activeBuffs.double ? 2 : 1);
+          const points = insectData.points * (buffs.double ? 2 : 1);
           
           createCollectionParticles(insect.x - game.camera, insect.y, insectData.color);
           
@@ -542,7 +584,7 @@ const SkyHunter = () => {
       delta = Math.min(delta, 3);
 
       // Update game logic
-      if (!isPaused) {
+      if (!isPausedRef.current) {
         updateGame(delta);
       }
 
@@ -817,7 +859,7 @@ const SkyHunter = () => {
       window.removeEventListener('blur', handleBlur);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [gameState, score, activeBuffs, isPaused, spawnCloud, spawnInsect, spawnFly, checkCollision, activateBuff, createCollectionParticles, createCloudHitParticles, computeSpeed, GRAVITY, JUMP_FORCE]);
+  }, [gameState, spawnCloud, spawnInsect, spawnFly, checkCollision, activateBuff, createCollectionParticles, createCloudHitParticles, computeSpeed, GRAVITY, JUMP_FORCE]);
 
   return (
     <div style={{
@@ -971,7 +1013,13 @@ const SkyHunter = () => {
             
             <button
               className="game-button"
-              onClick={() => setIsPaused(!isPaused)}
+              onClick={() => {
+                setIsPaused(prev => {
+                  const next = !prev;
+                  isPausedRef.current = next;
+                  return next;
+                });
+              }}
               style={{
                 background: 'rgba(255,255,255,0.95)',
                 color: '#2C3E50',
@@ -999,6 +1047,36 @@ const SkyHunter = () => {
               {Array(lives).fill(0).map((_, i) => (
                 <Heart key={i} size={24} fill="#EF4444" color="#EF4444" />
               ))}
+              {isCloudCooldown && !activeBuffs.invincible && !activeBuffs.shield && (
+                <span style={{
+                  marginLeft: '6px',
+                  padding: '4px 10px',
+                  borderRadius: '999px',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  color: '#2C3E50',
+                  background: 'rgba(44, 62, 80, 0.12)',
+                  border: '1px solid rgba(44, 62, 80, 0.2)'
+                }}>
+                  ЗАЩИТА 1с
+                </span>
+              )}
+              {(activeBuffs.invincible || activeBuffs.shield) && (
+                <span style={{
+                  marginLeft: '6px',
+                  padding: '4px 10px',
+                  borderRadius: '999px',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  color: 'white',
+                  background: activeBuffs.invincible
+                    ? 'linear-gradient(135deg, #FFD700 0%, #FFA500 100%)'
+                    : '#FBBF24',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
+                }}>
+                  {activeBuffs.invincible ? 'НЕУЯЗВИМ.' : 'ЩИТ'}
+                </span>
+              )}
             </div>
           </div>
 
@@ -1136,7 +1214,10 @@ const SkyHunter = () => {
                 </h2>
                 <button
                   className="game-button"
-                  onClick={() => setIsPaused(false)}
+                  onClick={() => {
+                    isPausedRef.current = false;
+                    setIsPaused(false);
+                  }}
                   style={{
                     background: 'linear-gradient(135deg, #F093FB 0%, #F5576C 100%)',
                     color: 'white'
